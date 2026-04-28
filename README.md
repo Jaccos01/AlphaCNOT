@@ -1,9 +1,9 @@
 
-## AlphaCNOT repository
+# AlphaCNOT repository
 A very basic implementation of AlphaZero style learning with the MCTX framework for Monte Carlo Tree Search in JAX. The included basic_tree_search.py script assumes the agent have access to the exact environment dynamics and does not include any model learning, but rather learns a policy and value function from tree search results as in AlphaZero.
-# ---->CHANGE
+## ---->CHANGE
 
-# Dependencies
+## Dependencies
 Using this repo requires JAX, Haiku, NumPy and wandb...
 
 
