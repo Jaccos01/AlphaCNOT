@@ -15,8 +15,8 @@ You can start a training of a new AlphaCNOT model with
 python train_model --n_qubits "your_card" --topology "your_topology" --steps "your_training_steps"
 ```
 
-## Training a model
-You can test a model of AlphaCNOT with 
+## Validating a model
+You can validate a model of AlphaCNOT with 
 ```bash
 python test_model --n_qubits "your_card" --topology "your_topology" --name "name_of_the_model" --s "number_of_matrices" --r "number_of_repetitions_for_each_matrix"
 ```
