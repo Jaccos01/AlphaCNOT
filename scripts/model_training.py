@@ -31,12 +31,20 @@ def model_training(model_name, n_qubits, topology, reward, config, epochs, outpu
     print(f"Running training for cardinality: {Card}")
     print(f"Topology: {Topology}")
 
-    if reward == "mix":
-        first_stage = int((epochs/2))
-        second_stage = epochs - first_stage
-    else:
+    reward = reward.lower() if isinstance(reward, str) else "mix"
+    
+    if reward == "inf":
         first_stage = epochs
         second_stage = 0
+        reward_label = "INF"
+    else:
+        if reward != "mix":
+            print(f"Reward '{reward}' unknown. Using MIX.")
+        reward = "mix"
+        first_stage = int(epochs / 2)
+        second_stage = epochs - first_stage
+        reward_label = "MIX"
+
 
     num_checkpoints = 100
     config.eval_frequency = max(1, first_stage // num_checkpoints)
@@ -45,7 +53,7 @@ def model_training(model_name, n_qubits, topology, reward, config, epochs, outpu
     key = jx.random.PRNGKey(random.randint(0, 10000))
 
     config.update({"agent_type":"basic_tree_search", "seed":key})
-    config.update({"num_epochs": epochs})
+    #config.update({"num_epochs": epochs})
     config.update({"env_config":{"cardinality":Card, "topology":Topology}})
 
     # Environment setup
@@ -53,29 +61,28 @@ def model_training(model_name, n_qubits, topology, reward, config, epochs, outpu
     # Configuration setup
     env_config = config.env_config
 
-    folder_path = output_dir
+    folder_path = f"{output_dir}_{reward_label}"
     os.makedirs(folder_path, exist_ok=True)
 
+    params_dir = os.path.join(folder_path, "params")
+    out_dir = os.path.join(folder_path, "out")
+
+    os.makedirs(params_dir, exist_ok=True)
+    os.makedirs(out_dir, exist_ok=True)
+
     json_config_path = os.path.join(folder_path, f"{model_name}.json")
-    out_path = os.path.join(folder_path, f"{model_name}.out")
-    params_path = os.path.join(folder_path, f"{model_name}.params")
+    out_path = os.path.join(out_dir, f"{model_name}.out")
+    params_path = os.path.join(params_dir, f"{model_name}.params")
+
+    
 
     if reward == "mix":
-        out_path_first_stage = os.path.join(folder_path, f"{model_name}_first_stage.out")
-        params_path_first_stage = os.path.join(folder_path, f"{model_name}_first_stage.params")
-
-    # data_to_save = {
-    #     "training_information": jax_to_python(dict(config)) # Convertiamo tutto qui!
-    # }
-
-    # with open(json_config_path, "w") as f:
-    #     json.dump(data_to_save, f, indent=4)
+        out_path_first_stage = os.path.join(out_dir, f"{model_name}_first_stage.out")
+        params_path_first_stage = os.path.join(params_dir, f"{model_name}_first_stage.params")
 
     # Prepare config for saving (converting JAX types to standard Python)
     saveable_config = dict(config)
     
-    # The 'seed' is a JAX Array and cannot be saved directly to JSON.
-    # We convert it to a list or a string to avoid the TypeError.
     if "seed" in saveable_config:
         saveable_config["seed"] = jax_to_python(saveable_config["seed"])
 
@@ -291,17 +298,17 @@ def model_training(model_name, n_qubits, topology, reward, config, epochs, outpu
         
         if len(valid_avg_returns) > 0:
             current_avg_ret = jnp.mean(valid_avg_returns / (1 - config.avg_return_smoothing**valid_num_episodes))
-            print(f"Running Average Return: {current_avg_ret:.4f}")
+            tqdm.write(f"Running Average Return: {current_avg_ret:.4f}")
             avg_returns.append(float(current_avg_ret))
         else:
-            print("Running Average Return: N/A (No episodes completed yet)")
+            tqdm.write("Running Average Return: N/A (No episodes completed yet)")
             avg_returns.append(0.0)
 
         time_step += config.eval_frequency
         times.append(time_step)
 
 
-
+    
 
     if reward == "mix":
         # Saving of the model from the first phase (informed reward) before starting the second phase
@@ -340,10 +347,10 @@ def model_training(model_name, n_qubits, topology, reward, config, epochs, outpu
             
             if len(valid_avg_returns) > 0:
                 current_avg_ret = jnp.mean(valid_avg_returns / (1 - config.avg_return_smoothing**valid_num_episodes))
-                print(f"Running Average Return: {current_avg_ret:.4f}")
+                tqdm.write(f"Running Average Return: {current_avg_ret:.4f}")
                 avg_returns.append(float(current_avg_ret))
             else:
-                print("Running Average Return: N/A (No episodes completed yet)")
+                tqdm.write("Running Average Return: N/A (No episodes completed yet)")
                 avg_returns.append(0.0)
 
             time_step += config.eval_frequency

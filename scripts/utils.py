@@ -35,7 +35,7 @@ def parse_train_args():
     # CLI Arguments
     parser.add_argument("--n_qubits", type=int, default=5, help="Number of qubits (cardinality)")
     parser.add_argument("--topology", type=str, default="ALL", help="Network topology (e.g., ALL, L, T, Y)")
-    parser.add_argument("--r", type=str, default="mix", help="Reward function type")
+    parser.add_argument("--reward", type=str, default="mix", help="Reward function type")
     parser.add_argument("--epochs", type=int, default=1000, help="Number of training steps/epochs")
     
     return parser.parse_args()

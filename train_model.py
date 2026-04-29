@@ -17,21 +17,20 @@ def main():
     # 2. UPDATE CONFIG WITH CLI INPUTS
     config["env_config"]["cardinality"] = args.n_qubits
     config["env_config"]["topology"] = args.topology
-    config["num_steps"] = args.epochs
+    config["num_epochs"] = args.epochs
 
     model_name = f"model_AlphaCNOT_{args.n_qubits}Q_{args.topology}_top"
     # 3. DEFINE OUTPUT PATHS
     output_dir = f"models/Card_{args.n_qubits}/{model_name}"
-    os.makedirs(output_dir, exist_ok=True)
     
     print(f"--- Launching Training ---")
-    print(f"Qubits: {args.n_qubits} | Topology: {args.topology} | Reward: {args.r} | Epochs: {args.epochs}")
+    print(f"Qubits: {args.n_qubits} | Topology: {args.topology} | Reward: {args.reward} | Epochs: {args.epochs}")
 
     model_training(
         model_name=model_name,
         n_qubits=args.n_qubits,
         topology=args.topology,
-        reward = args.r,
+        reward = args.reward,
         config=config,
         epochs=args.epochs,
         output_dir=output_dir
