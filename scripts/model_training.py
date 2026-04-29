@@ -3,7 +3,7 @@ import json
 from tqdm import tqdm
 import pickle as pkl
 import functools
-from optimizers import adamw
+from scripts.optimizers import adamw
 import random
 
 import jax as jx
@@ -12,9 +12,9 @@ from jax import numpy as jnp
 import mctx
 import haiku as hk
 
-from utils import V_function, pi_function
-from utils import parse_train_args, dotdict
-import env
+from scripts.utils import V_function, pi_function
+from scripts.utils import parse_train_args, jax_to_python, dotdict
+from . import env_CNOT
 
 
 
@@ -23,7 +23,7 @@ def model_training(model_name, n_qubits, topology, reward, config, epochs, outpu
 
     if isinstance(config, dict):
         config = dotdict(config)
-        
+
     Card = n_qubits
     Topology = topology
 
@@ -38,15 +38,18 @@ def model_training(model_name, n_qubits, topology, reward, config, epochs, outpu
         first_stage = epochs
         second_stage = 0
 
-    # Random seed
-    seed = jx.random.PRNGKey(random.randint(0, 10000))
+    num_checkpoints = 100
+    config.eval_frequency = max(1, first_stage // num_checkpoints)
 
-    config.update({"agent_type":"basic_tree_search", "seed":seed})
+    # Initialize the primary JAX key
+    key = jx.random.PRNGKey(random.randint(0, 10000))
+
+    config.update({"agent_type":"basic_tree_search", "seed":key})
     config.update({"num_epochs": epochs})
     config.update({"env_config":{"cardinality":Card, "topology":Topology}})
 
     # Environment setup
-    Environment = getattr(env, config.environment)
+    Environment = getattr(env_CNOT, config.environment)
     # Configuration setup
     env_config = config.env_config
 
@@ -61,14 +64,23 @@ def model_training(model_name, n_qubits, topology, reward, config, epochs, outpu
         out_path_first_stage = os.path.join(folder_path, f"{model_name}_first_stage.out")
         params_path_first_stage = os.path.join(folder_path, f"{model_name}_first_stage.params")
 
+    # data_to_save = {
+    #     "training_information": jax_to_python(dict(config)) # Convertiamo tutto qui!
+    # }
 
-    data_to_save = {
-        "training_information": config
-    }
+    # with open(json_config_path, "w") as f:
+    #     json.dump(data_to_save, f, indent=4)
+
+    # Prepare config for saving (converting JAX types to standard Python)
+    saveable_config = dict(config)
+    
+    # The 'seed' is a JAX Array and cannot be saved directly to JSON.
+    # We convert it to a list or a string to avoid the TypeError.
+    if "seed" in saveable_config:
+        saveable_config["seed"] = jax_to_python(saveable_config["seed"])
 
     with open(json_config_path, "w") as f:
-        json.dump(data_to_save, f, indent=4)
-
+        json.dump(saveable_config, f, indent=4)
 
 
     def get_recurrent_fn(env, V_func, pi_func):
@@ -304,7 +316,7 @@ def model_training(model_name, n_qubits, topology, reward, config, epochs, outpu
                 'V' : get_V_params(run_state['V_opt_state']),
                 'pi' : get_pi_params(run_state['pi_opt_state'])
             }, f)
-
+        print(f"\n📁 Partial parameters saved in: {folder_path}")
         print("\n🔄 Switching to NOT INFORMED REWARD...")
 
         env_non_informed = Environment(cardinality=Card, topology=Topology, informed_reward=False)
@@ -351,5 +363,5 @@ def model_training(model_name, n_qubits, topology, reward, config, epochs, outpu
             'pi' : get_pi_params(run_state['pi_opt_state'])
         }, f)
 
-    print(f"n✅ Task completed successfully!")
+    print(f"\n✅ Task completed successfully!")
     print(f"📁 All files saved in: {folder_path}")

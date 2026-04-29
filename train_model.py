@@ -2,7 +2,7 @@ import argparse
 import os
 import json
 
-from scripts import model_training 
+from scripts.model_training import model_training
 from scripts.utils import parse_train_args
 
 
@@ -25,7 +25,7 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
     
     print(f"--- Launching Training ---")
-    print(f"Qubits: {args.n_qubits} | Topology: {args.topology} | Reward: {args.r} | Steps: {args.epochs}")
+    print(f"Qubits: {args.n_qubits} | Topology: {args.topology} | Reward: {args.r} | Epochs: {args.epochs}")
 
     model_training(
         model_name=model_name,

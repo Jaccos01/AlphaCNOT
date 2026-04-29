@@ -198,7 +198,7 @@ class env_AlphaCNOT:
         self.max_operations = jnp.floor((self.cardinality**2)).astype(jnp.int32)
         self.limit = jnp.floor((self.cardinality**2)/jnp.log2(self.cardinality)).astype(jnp.int32)
 
-        if topology is None:
+        if topology is None or topology == "ALL":
             self.topology = fully_connected_topology(cardinality)
         elif topology == "L":
             self.topology = linear_topology(cardinality)
@@ -291,7 +291,7 @@ class env_AlphaCNOT:
 
         terminal=jnp.logical_or(terminal_1,terminal_2)
 
-        return env_state, self.get_observation(env_state), reward, terminal, {"hamming distance": hamming_distance_t1}
+        return env_state, self.get_observation(env_state), reward, terminal, {"hamming_distance": hamming_distance_t1}
 
 
     @partial(jit, static_argnums=(0,))

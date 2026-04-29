@@ -8,7 +8,7 @@ import pickle as pkl
 import json
 import mctx
 import functools
-from scripts import env
+from scripts import env_CNOT
 import argparse
 
 class dotdict(dict):
@@ -17,6 +17,18 @@ class dotdict(dict):
     __setattr__ = dict.__setitem__
     __delattr__ = dict.__delitem__
 
+def jax_to_python(obj):
+    if isinstance(obj, dict):
+        return {k: jax_to_python(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [jax_to_python(v) for v in obj]
+    elif hasattr(obj, "tolist"): # Converte array JAX/NumPy in liste
+        return obj.tolist()
+    elif hasattr(obj, "item") and not hasattr(obj, "__len__"): # Converte scalari JAX in float/int
+        return obj.item()
+    else:
+        return obj
+
 def parse_train_args():
     parser = argparse.ArgumentParser(description="Circuit Optimization Training CLI")
     
@@ -24,7 +36,6 @@ def parse_train_args():
     parser.add_argument("--n_qubits", type=int, default=5, help="Number of qubits (cardinality)")
     parser.add_argument("--topology", type=str, default="ALL", help="Network topology (e.g., ALL, L, T, Y)")
     parser.add_argument("--r", type=str, default="mix", help="Reward function type")
-    #parser.add_argument("--reward", type=str, default="mix", help="Reward function type")
     parser.add_argument("--epochs", type=int, default=1000, help="Number of training steps/epochs")
     
     return parser.parse_args()
