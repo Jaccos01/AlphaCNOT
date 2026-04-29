@@ -13,7 +13,7 @@ import mctx
 import haiku as hk
 
 from utils import V_function, pi_function
-from utils import parse_train_args
+from utils import parse_train_args, dotdict
 import env
 
 
@@ -21,6 +21,9 @@ import env
 
 def model_training(model_name, n_qubits, topology, reward, config, epochs, output_dir):
 
+    if isinstance(config, dict):
+        config = dotdict(config)
+        
     Card = n_qubits
     Topology = topology
 
@@ -68,7 +71,6 @@ def model_training(model_name, n_qubits, topology, reward, config, epochs, outpu
 
 
 
-    # this assumes the agent has access to the exact environment dynamics
     def get_recurrent_fn(env, V_func, pi_func):
         batch_step = vmap(env.step, in_axes=(0,0))
         batch_pi_func = vmap(pi_func,in_axes=(None,0))
@@ -127,7 +129,7 @@ def model_training(model_name, n_qubits, topology, reward, config, epochs, outpu
 
             return (env_states, V_func, pi_func, V_opt_state, pi_opt_state, 
                 V_opt_update, pi_opt_update, get_V_params, V_target_params, 
-                get_pi_params, V_opt_init, pi_opt_init) # <--- Aggiunta per caricare modelli
+                get_pi_params, V_opt_init, pi_opt_init)
         return init_fn
 
     def get_AC_loss(pi_func, V_func):
@@ -155,7 +157,7 @@ def model_training(model_name, n_qubits, topology, reward, config, epochs, outpu
             def loop_function(S, data):
                 obs = batch_obs(S["env_states"])
                 pi_logits = batch_pi_func(get_pi_params(S["pi_opt_state"]), obs.astype(float))
-                V = batch_V_func(S["V_target_params"], obs.astype(float))
+                V = batch_V_func(S["V_target_params"], obs.astype(jnp.float32))
 
                 root = mctx.RootFnOutput(
                 prior_logits=pi_logits,
@@ -178,7 +180,7 @@ def model_training(model_name, n_qubits, topology, reward, config, epochs, outpu
                 ),
                 )
 
-                # tree search derived targets for policy and value function
+
                 search_policy = policy_output.action_weights
                 if(config.value_target=='maxq'):
                     search_value = policy_output.search_tree.qvalues(jnp.full(config.batch_size, policy_output.search_tree.ROOT_INDEX))[jnp.arange(config.batch_size), policy_output.action]
@@ -187,9 +189,6 @@ def model_training(model_name, n_qubits, topology, reward, config, epochs, outpu
                 else:
                     raise ValueError("Unknown value target.")
 
-                # compute loss gradient compared to tree search targets and update parameters
-                #pi_grads, V_grads = loss_grad(get_pi_params(S["pi_opt_state"]), get_V_params(S["V_opt_state"]), search_policy, search_value, obs)
-                
                 loss_val, (pi_grads, V_grads) = loss_value_and_grad(
                     get_pi_params(S["pi_opt_state"]), 
                     get_V_params(S["V_opt_state"]), 
@@ -208,12 +207,7 @@ def model_training(model_name, n_qubits, topology, reward, config, epochs, outpu
                 # always take action recommended by tree search
                 actions = policy_output.action
 
-                initial_matrices = S["env_states"][0]
-
                 S["env_states"], obs, reward, terminal, info = batch_step(actions, S["env_states"])
-
-
-                final_matrices = S["env_states"][0]
 
                 # reset environment if terminated
                 S["key"], subkey = jx.random.split(S["key"])
@@ -226,11 +220,11 @@ def model_training(model_name, n_qubits, topology, reward, config, epochs, outpu
                 S["episode_return"] = jnp.where(terminal, 0, S["episode_return"])
                 S["num_episodes"] = jnp.where(terminal, S["num_episodes"]+1, S["num_episodes"])
 
-                #Salvataggio dei dati 
+                # Metrics logging
                 current_metrics = {
                     "num_episodes": S["num_episodes"],
                     "reward_current_step": reward,
-                    "hamming distance": info["hamming distance"],
+                    "hamming_distance": info["hamming_distance"],
                 }
                 return S, current_metrics
 
@@ -260,9 +254,9 @@ def model_training(model_name, n_qubits, topology, reward, config, epochs, outpu
 
     recurrent_fn = get_recurrent_fn(env, V_func, pi_func)
 
-    agent_environment_interaction_loop_function = jit(get_agent_environment_interaction_loop_function(env, V_func, pi_func, recurrent_fn, V_opt_update, pi_opt_update, get_V_params, get_pi_params, num_actions, config.eval_frequency))
-
-    # run_state contains all information to be maintained and updated in agent_environment_interaction_loop
+    agent_environment_interaction_loop_function = jit(get_agent_environment_interaction_loop_function(env, V_func, pi_func, 
+                                                        recurrent_fn, V_opt_update, pi_opt_update, get_V_params, get_pi_params, 
+                                                        num_actions, config.eval_frequency))
     run_state_names = ["env_states", "V_opt_state", "V_target_params", "pi_opt_state", "opt_t", "avg_return", "episode_return", "num_episodes", "key"]
     var_dict = locals()
     run_state = {name:var_dict[name] for name in run_state_names}
@@ -273,14 +267,13 @@ def model_training(model_name, n_qubits, topology, reward, config, epochs, outpu
 
 
 
-        # --- FASE 1: INFORMED REWARD ---
-    print("🚀 Inizio FASE 1: Informed Reward")
-    # L'ambiente è già inizializzato con informed_reward=True (default o da config)
+    # --- PHASE 1: INFORMED REWARD ---
+    print("🚀 Starting PHASE 1: Informed Reward")
+
     for i in tqdm(range(first_stage // config.eval_frequency)):
         run_state, _ = agent_environment_interaction_loop_function(run_state)
 
 
-        # 3. Calcolo dell'Average Return (Debiased)
         valid_avg_returns = run_state["avg_return"][run_state["num_episodes"] > 0]
         valid_num_episodes = run_state["num_episodes"][run_state["num_episodes"] > 0]
         
@@ -292,7 +285,6 @@ def model_training(model_name, n_qubits, topology, reward, config, epochs, outpu
             print("Running Average Return: N/A (No episodes completed yet)")
             avg_returns.append(0.0)
 
-        # 4. Aggiornamento contatori temporali
         time_step += config.eval_frequency
         times.append(time_step)
 
@@ -313,25 +305,23 @@ def model_training(model_name, n_qubits, topology, reward, config, epochs, outpu
                 'pi' : get_pi_params(run_state['pi_opt_state'])
             }, f)
 
-        print("\n🔄 Switch a NOT INFORMED REWARD...")
-        # 1. Creiamo il nuovo ambiente con reward non informata e con la topologia
+        print("\n🔄 Switching to NOT INFORMED REWARD...")
+
         env_non_informed = Environment(cardinality=Card, topology=Topology, informed_reward=False)
 
-        # 2. Dobbiamo rigenerare la funzione di interazione perché l'ambiente è cambiato
         recurrent_fn_2 = get_recurrent_fn(env_non_informed, V_func, pi_func)
         agent_env_loop_non_informed = jit(get_agent_environment_interaction_loop_function(
             env_non_informed, V_func, pi_func, recurrent_fn_2, 
             V_opt_update, pi_opt_update, get_V_params, get_pi_params, 
             num_actions, config.eval_frequency
         ))
-        # --- FASE 2: NOT INFORMED REWARD  ---
-        print("🚀 Inizio FASE 2: Not Informed Reward")
+
+        # --- PHASE 2: NOT INFORMED REWARD  ---
+        print("🚀 Starting PHASE 2: Not Informed Reward")
         for i in tqdm(range(second_stage // config.eval_frequency)):
-            # Usiamo la NUOVA funzione ma lo STESSO run_state (che ha i pesi della Fase 1)
             run_state, _ = agent_env_loop_non_informed(run_state)
 
 
-            # 3. Calcolo dell'Average Return (Debiased)
             valid_avg_returns = run_state["avg_return"][run_state["num_episodes"] > 0]
             valid_num_episodes = run_state["num_episodes"][run_state["num_episodes"] > 0]
 
@@ -344,12 +334,10 @@ def model_training(model_name, n_qubits, topology, reward, config, epochs, outpu
                 print("Running Average Return: N/A (No episodes completed yet)")
                 avg_returns.append(0.0)
 
-            # 4. Aggiornamento contatori temporali
             time_step += config.eval_frequency
             times.append(time_step)
 
 
-    # --- Salvataggio .out (PKL) ---
     with open(out_path, 'wb') as f:
         pkl.dump({
             'config': dict(config),
@@ -357,12 +345,11 @@ def model_training(model_name, n_qubits, topology, reward, config, epochs, outpu
             'times': times
         }, f)
 
-    # --- Salvataggio .params (PKL) ---
     with open(params_path, 'wb') as f:
         pkl.dump({
             'V' : get_V_params(run_state['V_opt_state']),
             'pi' : get_pi_params(run_state['pi_opt_state'])
         }, f)
 
-    print(f"\n✅ Task completato con successo!")
-    print(f"📁 Tutti i file sono stati salvati in: {folder_path}")
+    print(f"n✅ Task completed successfully!")
+    print(f"📁 All files saved in: {folder_path}")
