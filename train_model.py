@@ -25,11 +25,13 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
     
     print(f"--- Launching Training ---")
-    print(f"Qubits: {args.n_qubits} | Topology: {args.topology} | Steps: {args.epochs}")
+    print(f"Qubits: {args.n_qubits} | Topology: {args.topology} | Reward: {args.r} | Steps: {args.epochs}")
 
     model_training(
+        model_name=model_name,
         n_qubits=args.n_qubits,
         topology=args.topology,
+        reward = args.r,
         config=config,
         epochs=args.epochs,
         output_dir=output_dir

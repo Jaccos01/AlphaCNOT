@@ -14,7 +14,7 @@
  "batch_size":64,
  "avg_return_smoothing":0.5,
  "num_simulations":50,
- "num_steps":1750000,
+ "num_epochs":17500,
  "eval_frequency":2000,
  "environment": "env_AlphaCNOT",
  "env_config":
