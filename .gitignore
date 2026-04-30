@@ -3,3 +3,7 @@ validation_results/
 
 # Content of trained models
 models/
+
+# Python caches
+**/__pycache__/
+*.py[cod]
