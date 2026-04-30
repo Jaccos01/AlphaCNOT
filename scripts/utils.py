@@ -10,6 +10,7 @@ import mctx
 import functools
 from scripts import env_CNOT
 import argparse
+from types import SimpleNamespace
 
 class dotdict(dict):
     """dot.notation access to dictionary attributes"""
@@ -127,6 +128,69 @@ def circuit_to_matrix(cnot_list, cardinality):
         matrix = matrix.at[target].set((matrix[target] + matrix[control]) % 2)
     return matrix
 
+def load_alphacnot_model(cardinality, topology, source="user", reward_type="mix"):
+    
+    if topology is None:
+        topology = "ALL"
+
+    root_dir = os.getcwd()
+    topo_upper = topology.upper()
+    
+    if source == "baseline":
+
+        base_folder = os.path.join(root_dir, "baseline", f"Card_{cardinality}")
+        model_name_base = f"alphacnot_{cardinality}{topo_upper}"
+        
+        params_path = os.path.join(base_folder, f"{model_name_base}.params")
+        config_path = os.path.join(root_dir, "scripts", "config_custom_circuit.json")
+        
+        print(f"BASELINE model chosen: {model_name_base}")
+
+    elif source == "user":
+
+        reward_label = reward_type.upper()
+        base_folder = os.path.join(root_dir, "models", f"Card_{cardinality}")
+        model_name_base = f"model_AlphaCNOT_{cardinality}Q_{topo_upper}_top"
+        
+        specific_folder = os.path.join(base_folder, f"{model_name_base}_{reward_label}")
+        
+        params_path = os.path.join(specific_folder, "params", f"{model_name_base}.params")
+        config_path = os.path.join(specific_folder, f"{model_name_base}.json")
+        
+        print(f"USER model chosen: {model_name_base}_{reward_label}")
+    
+    else:
+        raise ValueError("Source can be 'baseline' or 'user'.")
+
+    if not os.path.exists(params_path):
+        raise FileNotFoundError(f"FileNotFoundError: {params_path}")
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"FileNotFoundError: {config_path}")
+
+    with open(params_path, 'rb') as f:
+        params = pkl.load(f)
+    with open(config_path, 'r') as f:
+        config_dict = json.load(f)
+    
+    config = dotdict(config_dict)
+
+    if isinstance(config.get('env_config'), dict):
+        config['env_config'] = dotdict(config['env_config'])
+
+    config.env_config.cardinality = cardinality
+    config.env_config.topology = topology
+
+    Environment = getattr(env_CNOT, config.environment)
+    env = Environment(**config.env_config)
+    num_actions = env.num_actions()
+
+    V_net = hk.without_apply_rng(hk.transform(lambda o: V_function(config)(o.astype(float))))
+    pi_net = hk.without_apply_rng(hk.transform(lambda o: pi_function(config, num_actions)(o.astype(float))))
+
+    print("Model and configuration successfully loaded.")
+    
+    return params, config, V_net, pi_net, env
+
 def load_model_custom(cardinality, topology):
     # 1. Trova la cartella dove risiede fisicamente questo file (scripts/)
     utils_dir = os.path.dirname(os.path.abspath(__file__))
@@ -222,6 +286,64 @@ def apply_AlphaCNOT(model_bundle, cnot_list, card):
     matrix = circuit_to_matrix(cnot_list, card)
 
     state = (matrix, jnp.array(0), jnp.array(0), jax.random.PRNGKey(0))
+    
+    rec_fn = get_recurrent_fn_simple(env, V_net.apply, pi_net.apply, config)
+    
+    @jax.jit
+    def get_action(params, key, state):
+        obs = env.get_observation(state)
+        obs_batch = jnp.expand_dims(obs.astype(float), 0)
+        state_batch = jax.tree_util.tree_map(lambda x: jnp.expand_dims(x, 0), state)
+        
+        pi_logits = pi_net.apply(params["pi"], obs_batch)
+        v_value = V_net.apply(params["V"], obs_batch)
+
+        root = mctx.RootFnOutput(
+            prior_logits=jnp.reshape(pi_logits, (1, num_actions)), 
+            value=jnp.reshape(v_value, (1,)),
+            embedding=state_batch
+        )
+
+        policy_output = mctx.gumbel_muzero_policy(
+            params=params, rng_key=key, root=root, recurrent_fn=rec_fn,
+            num_simulations=config.get("num_simulations", 16),
+            max_num_considered_actions=num_actions,
+            qtransform=functools.partial(
+                mctx.qtransform_completed_by_mix_value,
+                use_mixed_value=config.get("use_mixed_value", True),
+                value_scale=config.get("value_scale", 1.0)
+            ),
+        )
+        return policy_output.action[0]
+
+    optimized_cnots = []
+    max_steps = card**2
+    master_key = jax.random.PRNGKey(42)
+    
+    for _ in range(max_steps):
+        master_key, subkey = jax.random.split(master_key)
+        action = get_action(params, subkey, state)
+        state, _, _, done, info = env.step(action, state)
+        control, target = index_to_pair(action, card)
+        optimized_cnots.append((int(control), int(target)))
+        
+        if info.get("hamming_distance", 1.0) == 0 or done:
+            break
+            
+    return optimized_cnots
+
+
+
+def apply_AlphaCNOT_from_matrix(model_bundle, matrix, card):
+    """
+    Return the optimized CNOT list after applying 
+    the chosen AlphaCNOT model to the input CNOT list.
+    """
+    params, config, V_net, pi_net, env = model_bundle
+    num_actions = env.num_actions()
+
+
+    state = (matrix.astype(jnp.float32), jnp.array(0), jnp.array(0), jax.random.PRNGKey(0))
     
     rec_fn = get_recurrent_fn_simple(env, V_net.apply, pi_net.apply, config)
     
