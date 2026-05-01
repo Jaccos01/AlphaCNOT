@@ -191,40 +191,6 @@ def load_alphacnot_model(cardinality, topology, source="user", reward_type="mix"
     
     return params, config, V_net, pi_net, env
 
-def load_model_custom(cardinality, topology):
-    # 1. Trova la cartella dove risiede fisicamente questo file (scripts/)
-    utils_dir = os.path.dirname(os.path.abspath(__file__))
-    
-    # 2. Il JSON è nella stessa cartella di questo script (scripts/)
-    config_path = os.path.join(utils_dir, "config_custom_circuit.json")
-    
-    # 3. La cartella models è al piano di sopra rispetto a scripts/
-    folder = os.path.join(os.path.dirname(utils_dir), "models")
-    
-    name_model = f"alphacnot_{cardinality}{topology}.params"
-    path = os.path.join(folder, name_model)
-
-    # Caricamento Params
-    with open(path, 'rb') as f:
-        params = pkl.load(f)
-
-    # Caricamento JSON (ora il percorso è corretto!)
-    with open(config_path, 'r') as f:
-        config = json.load(f)
-    # Update cardinality and topology in config
-    config["env_config"]["cardinality"] = cardinality
-    config["env_config"]["topology"] = topology
-
-
-    env = env.AlphaCNOT_env_topology(cardinality=cardinality, topology=topology)
-    num_actions = env.num_actions()
-
-    # Load the networks
-    V_net = hk.without_apply_rng(hk.transform(lambda o: V_function(config)(o.astype(float))))
-    pi_net = hk.without_apply_rng(hk.transform(lambda o: pi_function(config, num_actions)(o.astype(float))))
-
-    return params, config, V_net, pi_net, env
-
 def index_to_pair(idx, cardinality):
     i = idx // (cardinality - 1)
     j = idx % (cardinality - 1)
@@ -246,16 +212,16 @@ def generate_random_moves(key, cardinality, num_pairs):
         return jnp.stack([i, j], axis=1)
 
 def apply_xor(
-        intial_matrix: chex.Array,
+        initial_matrix: chex.Array,
         action_index: chex.Array, 
         ) -> chex.Array:
 
         action_index = jnp.atleast_1d(action_index)
         control_idx, target_idx = action_index[0], action_index[1]
-        control_row = intial_matrix[control_idx] 
-        target_row = intial_matrix[target_idx]
+        control_row = initial_matrix[control_idx] 
+        target_row = initial_matrix[target_idx]
         new_target_row = jnp.mod(target_row + control_row, 2)
-        new_matrix = intial_matrix.at[target_idx].set(new_target_row)
+        new_matrix = initial_matrix.at[target_idx].set(new_target_row)
         
         return new_matrix.astype(jnp.float32)
 
@@ -276,6 +242,7 @@ def get_recurrent_fn_simple(env, V_func, pi_func, config):
     return recurrent_fn
 
 def apply_AlphaCNOT(model_bundle, cnot_list, card):
+    solved = False
     """
     Return the optimized CNOT list after applying 
     the chosen AlphaCNOT model to the input CNOT list.
@@ -284,9 +251,12 @@ def apply_AlphaCNOT(model_bundle, cnot_list, card):
     num_actions = env.num_actions()
 
     matrix = circuit_to_matrix(cnot_list, card)
+    identity = jnp.eye(card, dtype=jnp.float32)
+
+    if jnp.allclose(matrix, identity, atol=1e-5):
+        return [], True
 
     state = (matrix, jnp.array(0), jnp.array(0), jax.random.PRNGKey(0))
-    
     rec_fn = get_recurrent_fn_simple(env, V_net.apply, pi_net.apply, config)
     
     @jax.jit
@@ -324,68 +294,21 @@ def apply_AlphaCNOT(model_bundle, cnot_list, card):
         master_key, subkey = jax.random.split(master_key)
         action = get_action(params, subkey, state)
         state, _, _, done, info = env.step(action, state)
-        control, target = index_to_pair(action, card)
+
+        action_idx = int(action) 
+
+        pair = env.topology[action_idx]
+        control, target = int(pair[0]), int(pair[1])
+
+        # # DEBUG
+        # print(f"Action Index: {action_idx} -> Pair: ({control}, {target}) | Valid in Topo: {env.topology.shape}")
         optimized_cnots.append((int(control), int(target)))
         
-        if info.get("hamming_distance", 1.0) == 0 or done:
+        if done:
+            solved = True
             break
+
             
-    return optimized_cnots
+    return optimized_cnots[::-1], solved
 
 
-
-def apply_AlphaCNOT_from_matrix(model_bundle, matrix, card):
-    """
-    Return the optimized CNOT list after applying 
-    the chosen AlphaCNOT model to the input CNOT list.
-    """
-    params, config, V_net, pi_net, env = model_bundle
-    num_actions = env.num_actions()
-
-
-    state = (matrix.astype(jnp.float32), jnp.array(0), jnp.array(0), jax.random.PRNGKey(0))
-    
-    rec_fn = get_recurrent_fn_simple(env, V_net.apply, pi_net.apply, config)
-    
-    @jax.jit
-    def get_action(params, key, state):
-        obs = env.get_observation(state)
-        obs_batch = jnp.expand_dims(obs.astype(float), 0)
-        state_batch = jax.tree_util.tree_map(lambda x: jnp.expand_dims(x, 0), state)
-        
-        pi_logits = pi_net.apply(params["pi"], obs_batch)
-        v_value = V_net.apply(params["V"], obs_batch)
-
-        root = mctx.RootFnOutput(
-            prior_logits=jnp.reshape(pi_logits, (1, num_actions)), 
-            value=jnp.reshape(v_value, (1,)),
-            embedding=state_batch
-        )
-
-        policy_output = mctx.gumbel_muzero_policy(
-            params=params, rng_key=key, root=root, recurrent_fn=rec_fn,
-            num_simulations=config.get("num_simulations", 16),
-            max_num_considered_actions=num_actions,
-            qtransform=functools.partial(
-                mctx.qtransform_completed_by_mix_value,
-                use_mixed_value=config.get("use_mixed_value", True),
-                value_scale=config.get("value_scale", 1.0)
-            ),
-        )
-        return policy_output.action[0]
-
-    optimized_cnots = []
-    max_steps = card**2
-    master_key = jax.random.PRNGKey(42)
-    
-    for _ in range(max_steps):
-        master_key, subkey = jax.random.split(master_key)
-        action = get_action(params, subkey, state)
-        state, _, _, done, info = env.step(action, state)
-        control, target = index_to_pair(action, card)
-        optimized_cnots.append((int(control), int(target)))
-        
-        if info.get("hamming_distance", 1.0) == 0 or done:
-            break
-            
-    return optimized_cnots
