@@ -249,7 +249,6 @@ class env_AlphaCNOT:
         return jnp.stack([i, j], axis=1)
 
     
-    # NUOVA APPLY_XOR
     def apply_xor(
         self,
         intial_matrix: chex.Array,

@@ -23,9 +23,9 @@ def jax_to_python(obj):
         return {k: jax_to_python(v) for k, v in obj.items()}
     elif isinstance(obj, list):
         return [jax_to_python(v) for v in obj]
-    elif hasattr(obj, "tolist"): # Converte array JAX/NumPy in liste
+    elif hasattr(obj, "tolist"):
         return obj.tolist()
-    elif hasattr(obj, "item") and not hasattr(obj, "__len__"): # Converte scalari JAX in float/int
+    elif hasattr(obj, "item") and not hasattr(obj, "__len__"): 
         return obj.item()
     else:
         return obj
