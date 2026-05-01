@@ -16,10 +16,10 @@ def main():
     config_file = os.path.join(model_folder, f"{model_base_name}.json")
 
     if not os.path.exists(config_file):
-        print(f"❌ Errore: Configurazione non trovata in {config_file}")
+        print(f"Error: Config file not found in {config_file}")
         return
     if not os.path.exists(params_path):
-        print(f"❌ Errore: Pesi non trovati in {params_path}")
+        print(f"Error: Params file not found in {params_path}")
         return
 
     with open(config_file, 'r') as f:

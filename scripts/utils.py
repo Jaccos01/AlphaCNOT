@@ -300,8 +300,6 @@ def apply_AlphaCNOT(model_bundle, cnot_list, card):
         pair = env.topology[action_idx]
         control, target = int(pair[0]), int(pair[1])
 
-        # # DEBUG
-        # print(f"Action Index: {action_idx} -> Pair: ({control}, {target}) | Valid in Topo: {env.topology.shape}")
         optimized_cnots.append((int(control), int(target)))
         
         if done:
