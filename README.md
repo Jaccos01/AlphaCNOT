@@ -27,9 +27,11 @@ Use "synthesize_circuit.ipynb"
 4) AlphaCNOT synthesis 
 
 # Citation
+```bibtex
 @article{cossio2026alphacnot,
   title={AlphaCNOT: Learning CNOT Minimization with Model-Based Planning},
   author={Cossio, Jacopo and Bosco, Daniele Lizzio and Romanello, Riccardo and Serra, Giuseppe and Piazza, Carla},
   journal={arXiv preprint arXiv:2604.13812},
   year={2026}
 }
+```
