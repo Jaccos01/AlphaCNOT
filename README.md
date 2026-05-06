@@ -1,9 +1,9 @@
 
-# AlphaCNOT repository
-A very basic implementation of AlphaZero style learning with the MCTX framework for Monte Carlo Tree Search in JAX. The included basic_tree_search.py script assumes the agent have access to the exact environment dynamics and does not include any model learning, but rather learns a policy and value function from tree search results as in AlphaZero.
+# AlphaCNOT: Learning CNOT Minimization with Model-Based Planning
+A very basic implementation of AlphaZero style learning with the MCTX framework for Monte Carlo Tree Search in JAX. The training script model_training.py (based on "basic_tree_search.py script from https://github.com/kenjyoung/mctx_learning_demo) assumes the agent have access to the exact environment dynamics and does not include any model learning, but rather learns a policy and value function from tree search results as in AlphaZero.
 
 ## Dependencies
-Using this repo requires JAX, Haiku, NumPy and wandb...
+Using this repo requires JAX, Haiku, NumPy
 
 
 ## Training a model
@@ -26,3 +26,10 @@ Use "synthesize_circuit.ipynb"
 3) Automatic matrix translation
 4) AlphaCNOT synthesis 
 
+# Citation
+@article{cossio2026alphacnot,
+  title={AlphaCNOT: Learning CNOT Minimization with Model-Based Planning},
+  author={Cossio, Jacopo and Bosco, Daniele Lizzio and Romanello, Riccardo and Serra, Giuseppe and Piazza, Carla},
+  journal={arXiv preprint arXiv:2604.13812},
+  year={2026}
+}

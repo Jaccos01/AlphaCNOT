@@ -8,5 +8,3 @@ models/
 **/__pycache__/
 *.py[cod]
 
-# Synthesize custom
-synthesize_circuit.ipynb

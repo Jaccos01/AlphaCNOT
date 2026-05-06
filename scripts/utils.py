@@ -136,15 +136,15 @@ def load_alphacnot_model(cardinality, topology, source="user", reward_type="mix"
     root_dir = os.getcwd()
     topo_upper = topology.upper()
     
-    if source == "baseline":
+    if source == "trained_models":
 
-        base_folder = os.path.join(root_dir, "baseline", f"Card_{cardinality}")
+        base_folder = os.path.join(root_dir, "trained_models", f"Card_{cardinality}")
         model_name_base = f"alphacnot_{cardinality}{topo_upper}"
         
         params_path = os.path.join(base_folder, f"{model_name_base}.params")
         config_path = os.path.join(root_dir, "scripts", "config_custom_circuit.json")
         
-        print(f"BASELINE model chosen: {model_name_base}")
+        print(f"Model chosen (from trained_models): {model_name_base}")
 
     elif source == "user":
 
@@ -160,7 +160,7 @@ def load_alphacnot_model(cardinality, topology, source="user", reward_type="mix"
         print(f"USER model chosen: {model_name_base}_{reward_label}")
     
     else:
-        raise ValueError("Source can be 'baseline' or 'user'.")
+        raise ValueError("Source can be 'trained_models' or 'user'.")
 
     if not os.path.exists(params_path):
         raise FileNotFoundError(f"FileNotFoundError: {params_path}")
