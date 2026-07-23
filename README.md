@@ -30,7 +30,7 @@ Use "synthesize_circuit.ipynb"
 ```bibtex
 @article{cossio2026alphacnot,
   title={AlphaCNOT: Learning CNOT Minimization with Model-Based Planning},
-  author={Cossio, Jacopo and Bosco, Daniele Lizzio and Romanello, Riccardo and Serra, Giuseppe and Piazza, Carla},
+  author={Cossio, Jacopo and Lizzio Bosco, Daniele  and Romanello, Riccardo and Serra, Giuseppe and Piazza, Carla},
   journal={arXiv preprint arXiv:2604.13812},
   year={2026}
 }
