@@ -1,16 +1,19 @@
 import jax
 import jax.numpy as jnp
 import haiku as hk
-import optax    
 import chex
 import os
-import pickle as pkl
 import json
 import mctx
 import functools
 from scripts import env_CNOT
+from scripts.model_loading import (
+    REPOSITORY_ROOT,
+    load_model_file,
+    resolve_trained_model_path,
+    runtime_config_from_checkpoint,
+)
 import argparse
-from types import SimpleNamespace
 
 class dotdict(dict):
     """dot.notation access to dictionary attributes"""
@@ -45,11 +48,17 @@ def parse_test_args():
     parser = argparse.ArgumentParser(description="Circuit Optimization Testing/Validation CLI")
     
     # CLI Arguments
-    parser.add_argument("-n_qubits", type=int, default=5, help="Number of qubits (cardinality)")
-    parser.add_argument("-topology", type=str, default="ALL", help="Topology used (e.g., ALL, L, T, Y)")
-    parser.add_argument("-name", type=str, default="None", help="The name of the model folder")
-    parser.add_argument("-test", type=int, default=100, help="Number of random matrices to validate")
-    parser.add_argument("-rep", type=int, default=10, help="Number of repetitions per matrix")
+    parser.add_argument("--n_qubits", "-n_qubits", type=int, default=5, help="Number of qubits (cardinality)")
+    parser.add_argument("--topology", "-topology", type=str, default="ALL", help="Topology used (e.g., ALL, L, T, Y)")
+    parser.add_argument("--source", choices=("trained_models", "user"), default="trained_models")
+    parser.add_argument("--reward", "-name", choices=("mix", "inf"), default="mix")
+    parser.add_argument(
+        "--terminal_mode",
+        choices=("identity", "permutation-relaxed"),
+        default="identity",
+    )
+    parser.add_argument("--test", "-test", type=int, default=100, help="Number of random matrices to validate")
+    parser.add_argument("--rep", "-rep", type=int, default=10, help="Number of repetitions per matrix")
     
     return parser.parse_args()
 
@@ -128,23 +137,39 @@ def circuit_to_matrix(cnot_list, cardinality):
         matrix = matrix.at[target].set((matrix[target] + matrix[control]) % 2)
     return matrix
 
-def load_alphacnot_model(cardinality, topology, source="user", reward_type="mix"):
-    
+def load_alphacnot_model(
+    cardinality,
+    topology,
+    source="user",
+    reward_type="mix",
+    terminal_mode="identity",
+):
+    """Load a packaged checkpoint or a locally trained legacy model.
+
+    ``terminal_mode`` selects either an exact identity model or a
+    permutation-relaxed model.  For fully connected models, ``reward_type``
+    additionally selects the informed or mixed checkpoint.
+    """
+
+    cardinality = int(cardinality)
+    source = str(source).lower()
     if topology is None:
         topology = "ALL"
 
-    root_dir = os.getcwd()
+    root_dir = str(REPOSITORY_ROOT)
     topo_upper = topology.upper()
+    checkpoint_config = None
+    checkpoint_metadata = {}
     
     if source == "trained_models":
-
-        base_folder = os.path.join(root_dir, "trained_models", f"Card_{cardinality}")
-        model_name_base = f"alphacnot_{cardinality}{topo_upper}"
-        
-        params_path = os.path.join(base_folder, f"{model_name_base}.params")
-        config_path = os.path.join(root_dir, "scripts", "config_custom_circuit.json")
-        
-        print(f"Model chosen (from trained_models): {model_name_base}")
+        model_path = resolve_trained_model_path(
+            cardinality=cardinality,
+            topology=topo_upper,
+            reward_type=reward_type,
+            terminal_mode=terminal_mode,
+        )
+        params, checkpoint_config, checkpoint_metadata = load_model_file(model_path)
+        print(f"Model chosen (from trained_models): {model_path.relative_to(REPOSITORY_ROOT)}")
 
     elif source == "user":
 
@@ -154,23 +179,31 @@ def load_alphacnot_model(cardinality, topology, source="user", reward_type="mix"
         
         specific_folder = os.path.join(base_folder, f"{model_name_base}_{reward_label}")
         
-        params_path = os.path.join(specific_folder, "params", f"{model_name_base}.params")
+        model_path = os.path.join(specific_folder, "params", f"{model_name_base}.params")
         config_path = os.path.join(specific_folder, f"{model_name_base}.json")
         
         print(f"USER model chosen: {model_name_base}_{reward_label}")
+
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"FileNotFoundError: {model_path}")
+        if not os.path.exists(config_path):
+            raise FileNotFoundError(f"FileNotFoundError: {config_path}")
+
+        params, _, _ = load_model_file(model_path)
+        with open(config_path, 'r') as f:
+            config_dict = json.load(f)
     
     else:
         raise ValueError("Source can be 'trained_models' or 'user'.")
 
-    if not os.path.exists(params_path):
-        raise FileNotFoundError(f"FileNotFoundError: {params_path}")
-    if not os.path.exists(config_path):
-        raise FileNotFoundError(f"FileNotFoundError: {config_path}")
-
-    with open(params_path, 'rb') as f:
-        params = pkl.load(f)
-    with open(config_path, 'r') as f:
-        config_dict = json.load(f)
+    if checkpoint_config is not None:
+        config_dict = runtime_config_from_checkpoint(
+            checkpoint_config,
+            checkpoint_metadata,
+            cardinality,
+            topo_upper,
+            terminal_mode,
+        )
     
     config = dotdict(config_dict)
 
@@ -178,7 +211,8 @@ def load_alphacnot_model(cardinality, topology, source="user", reward_type="mix"
         config['env_config'] = dotdict(config['env_config'])
 
     config.env_config.cardinality = cardinality
-    config.env_config.topology = topology
+    config.env_config.topology = topo_upper
+    params = jax.tree_util.tree_map(jnp.asarray, params)
 
     Environment = getattr(env_CNOT, config.environment)
     env = Environment(**config.env_config)
@@ -190,6 +224,7 @@ def load_alphacnot_model(cardinality, topology, source="user", reward_type="mix"
     print("Model and configuration successfully loaded.")
     
     return params, config, V_net, pi_net, env
+
 
 def index_to_pair(idx, cardinality):
     i = idx // (cardinality - 1)
@@ -236,7 +271,7 @@ def get_recurrent_fn_simple(env, V_func, pi_func, config):
             reward=rewards,
             discount=(1.0 - terminals) * config.get("discount", 1.0),
             prior_logits=jnp.reshape(pi_logit, (actions.shape[0], -1)), 
-            value=jnp.reshape(V, (-1,)) 
+            value=jnp.where(terminals, 0.0, jnp.reshape(V, (-1,)))
         ), env_states
     
     return recurrent_fn
@@ -251,9 +286,7 @@ def apply_AlphaCNOT(model_bundle, cnot_list, card):
     num_actions = env.num_actions()
 
     matrix = circuit_to_matrix(cnot_list, card)
-    identity = jnp.eye(card, dtype=jnp.float32)
-
-    if jnp.allclose(matrix, identity, atol=1e-5):
+    if bool(env.is_goal(matrix)):
         return [], True
 
     state = (matrix, jnp.array(0), jnp.array(0), jax.random.PRNGKey(0))
@@ -277,17 +310,22 @@ def apply_AlphaCNOT(model_bundle, cnot_list, card):
         policy_output = mctx.gumbel_muzero_policy(
             params=params, rng_key=key, root=root, recurrent_fn=rec_fn,
             num_simulations=config.get("num_simulations", 16),
+            max_depth=config.get("max_depth"),
             max_num_considered_actions=num_actions,
+            gumbel_scale=config.get("gumbel_scale", 1.0),
             qtransform=functools.partial(
                 mctx.qtransform_completed_by_mix_value,
                 use_mixed_value=config.get("use_mixed_value", True),
-                value_scale=config.get("value_scale", 1.0)
+                value_scale=config.get("value_scale", 1.0),
+                maxvisit_init=config.get("maxvisit_init", 50.0),
+                rescale_values=config.get("q_rescale", True),
+                epsilon=config.get("q_epsilon", 1e-8),
             ),
         )
         return policy_output.action[0]
 
     optimized_cnots = []
-    max_steps = card**2
+    max_steps = config.get("max_steps", 4 * card**2)
     master_key = jax.random.PRNGKey(42)
     
     for _ in range(max_steps):
@@ -302,8 +340,10 @@ def apply_AlphaCNOT(model_bundle, cnot_list, card):
 
         optimized_cnots.append((int(control), int(target)))
         
-        if done:
+        if bool(info.get("is_solved", False)):
             solved = True
+            break
+        if bool(done):
             break
 
             

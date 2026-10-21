@@ -12,19 +12,22 @@ import time
 
 from scripts.utils import V_function, pi_function, get_recurrent_fn_simple, env_CNOT
 
-def run_validation(config, params_path, model_folder, n_test, n_rep, top):
-    # Parameters loading
-    with open(params_path, 'rb') as f:
-        params = pkl.load(f)
+def run_validation(config, params_path, model_folder, n_test, n_rep, top, model_bundle=None):
+    if model_bundle is None:
+        # Backward compatibility for locally trained legacy .params models.
+        with open(params_path, 'rb') as f:
+            params = pkl.load(f)
 
-    Environment = getattr(env_CNOT, config["environment"])
-    env = Environment(**config["env_config"])
-    num_actions = env.num_actions()
+        Environment = getattr(env_CNOT, config["environment"])
+        env = Environment(**config["env_config"])
+        num_actions = env.num_actions()
+        V_net = hk.without_apply_rng(hk.transform(lambda o: V_function(config)(o.astype(float))))
+        pi_net = hk.without_apply_rng(hk.transform(lambda o: pi_function(config, num_actions)(o.astype(float))))
+    else:
+        params, config, V_net, pi_net, env = model_bundle
+        num_actions = env.num_actions()
+
     card = config['env_config']['cardinality']
-
-    # Setup
-    V_net = hk.without_apply_rng(hk.transform(lambda o: V_function(config)(o.astype(float))))
-    pi_net = hk.without_apply_rng(hk.transform(lambda o: pi_function(config, num_actions)(o.astype(float))))
 
     rec_fn = get_recurrent_fn_simple(env, V_net.apply, pi_net.apply, config)
 
@@ -49,11 +52,16 @@ def run_validation(config, params_path, model_folder, n_test, n_rep, top):
             root=root,
             recurrent_fn=recurrent_fn,
             num_simulations=config["num_simulations"],
+            max_depth=config.get("max_depth"),
             max_num_considered_actions=num_actions,
+            gumbel_scale=config.get("gumbel_scale", 1.0),
             qtransform=functools.partial(
                 mctx.qtransform_completed_by_mix_value,
                 use_mixed_value=config.get("use_mixed_value", True),
-                value_scale=config.get("value_scale", 0.1)
+                value_scale=config.get("value_scale", 0.1),
+                maxvisit_init=config.get("maxvisit_init", 50.0),
+                rescale_values=config.get("q_rescale", True),
+                epsilon=config.get("q_epsilon", 1e-8),
             ),
         )
         return policy_output.action[0]
@@ -66,14 +74,11 @@ def run_validation(config, params_path, model_folder, n_test, n_rep, top):
     os.makedirs(specific_val_dir, exist_ok=True)
 
     
-    val_out_dir = os.path.join(model_folder, "out")
-    os.makedirs(val_out_dir, exist_ok=True)
-
     results = []
     success_count = 0
     all_episodes_moves = []
     master_key = jax.random.PRNGKey(int(time.time()))
-    max_steps = 2 * (card**2)
+    max_steps = config.get("max_steps", 4 * (card**2))
 
     print(f"🚀 Validation: {card}Q | Top: {top} | {n_test} test matrices")
 
@@ -98,7 +103,7 @@ def run_validation(config, params_path, model_folder, n_test, n_rep, top):
                 state, obs, reward, terminal, info = env.step(action, state)
                 steps += 1
                 
-                if info.get("hamming_distance", 1.0) == 0:
+                if info.get("is_solved", info.get("hamming_distance", 1.0) == 0):
                     success_count += 1
                     results_for_i.append(steps)
                     done = True
