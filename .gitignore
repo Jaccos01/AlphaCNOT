@@ -8,3 +8,5 @@ models/
 **/__pycache__/
 *.py[cod]
 
+#Full models
+ALPHACNOT_DEFINITIVE_MODELS
