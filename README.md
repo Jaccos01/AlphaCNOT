@@ -1,19 +1,26 @@
 # AlphaCNOT: Learning CNOT Minimization with Model-Based Planning
 
-A basic implementation of AlphaZero-style learning with the MCTX framework for
-Monte Carlo Tree Search in JAX. The training code assumes that the agent has
-access to the exact environment dynamics. It learns policy and value functions
-from tree-search results rather than learning an environment model.
+A basic implementation of AlphaZero-style learning with the
+[MCTX](https://github.com/google-deepmind/mctx) framework for Monte Carlo Tree
+Search in JAX. The training code assumes that the agent has access to the exact
+environment dynamics. It learns policy and value functions from tree-search
+results rather than learning an environment model.
 
 ## Dependencies
 
-Install the Python dependencies with:
+Create and activate a local virtual environment, then install the Python
+dependencies:
 
 ```bash
-pip install -r requirements.txt
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
 ```
 
 The main dependencies are JAX, Haiku, MCTX, Chex, NumPy, SciPy, and tqdm.
+The default JAX package installed by this command uses the CPU backend; follow
+the JAX installation instructions for the appropriate CUDA build when GPU
+support is required. The local `.venv/` directory is ignored by Git.
 
 ## Pretrained models
 
@@ -88,12 +95,15 @@ python main_train.py \
 ```
 
 Training output is written below `models/Card_<cardinality>/`.
+`main_train.py` currently trains exact-identity models and writes the legacy
+`.params` format, which remains loadable with `source="user"`.
 
 ## Gold Matrices
 
-`Gold Matrices/` contains the frozen benchmark used to evaluate AlphaCNOT. It
-is independent of the online random stream used during training, so different
-models and synthesis modes can be compared on exactly the same inputs.
+`Gold Matrices/` contains a frozen benchmark intended for controlled AlphaCNOT
+evaluation. It is independent of the online random stream used during training,
+so different models and synthesis modes can be compared on exactly the same
+inputs.
 
 For each supported cardinality from 4 to 8, the repository provides 100 unique
 and invertible binary parity matrices:
@@ -126,6 +136,12 @@ import numpy as np
 matrix = np.load("Gold Matrices/Card_6/matrix_000.npy")
 ```
 
+The current `main_validation.py` command does not load these files directly: it
+generates deterministic random test matrices through the environment. To use a
+selected `.npy` matrix today, first decompose it into a CNOT list and use the
+synthesis API described below; alternatively, add a dedicated matrix-evaluation
+entry point.
+
 ## Validating a model
 
 Validate a packaged permutation-relaxed checkpoint with:
@@ -142,20 +158,44 @@ python main_validation.py \
 ```
 
 Use `--terminal_mode identity` for an exact-identity model. When `--rep` is
-greater than one, AlphaCNOT tries multiple syntheses for each matrix and keeps
-the shortest successful result.
+greater than one, AlphaCNOT tries multiple syntheses for each matrix. Summary
+statistics use the shortest successful run, while the actions JSON retains all
+repetitions. The stored `actions` are policy-action indices for the reduction
+from the test matrix to the terminal state, not CNOT pairs in synthesis order.
 
 To validate a locally trained legacy model, use `--source user` together with
 the corresponding cardinality, topology, and reward.
 
 ## Synthesizing a custom circuit
 
-Open `synthesize_circuit.ipynb` and:
+Open `synthesize_circuit.ipynb` and select the `.venv` Python interpreter as its
+kernel. If the editor requests notebook support, install it with
+`python -m pip install ipykernel`. Then:
 
 1. Select and load an AlphaCNOT model.
-2. Define a CNOT circuit.
+2. Define the input circuit as a zero-based `(control, target)` CNOT list.
 3. Convert it to its parity matrix.
-4. Run AlphaCNOT synthesis.
+4. Run AlphaCNOT synthesis and verify the returned circuit.
+
+The notebook currently accepts a CNOT list, not a parity matrix supplied
+directly: changing only its `matrix` variable does not change the input passed
+to `apply_AlphaCNOT`. Use an exact-identity model when the returned CNOT list
+must reproduce the input matrix exactly. A permutation-relaxed model may return
+a circuit that is equivalent only up to an output-wire permutation, and the
+current synthesis API does not return that relabeling separately.
+
+## Acknowledgements and license
+
+AlphaCNOT is released under the MIT License; see [`LICENSE`](LICENSE).
+
+The project uses Google DeepMind's
+[MCTX](https://github.com/google-deepmind/mctx), an Apache-2.0-licensed JAX
+library providing the Monte Carlo tree-search implementation. The AlphaCNOT
+training loop was adapted from Kenny Young's MIT-licensed
+[Basic Learning Demo with MCTX](https://github.com/kenjyoung/mctx_learning_demo).
+That upstream MIT license is preserved in
+[`mctx_LICENSE/LICENSE`](mctx_LICENSE/LICENSE), with further details in
+[`mctx_LICENSE/README.md`](mctx_LICENSE/README.md).
 
 ## Citation
 
