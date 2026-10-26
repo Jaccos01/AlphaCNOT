@@ -8,5 +8,8 @@ models/
 **/__pycache__/
 *.py[cod]
 
+# Local virtual environment
+.venv/
+
 #Full models
 ALPHACNOT_DEFINITIVE_MODELS
